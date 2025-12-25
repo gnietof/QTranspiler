@@ -5,7 +5,8 @@ from pydantic import BaseModel
 from qiskit import QuantumRegister, ClassicalRegister, AncillaRegister,QuantumCircuit
 from qiskit_ibm_runtime import QiskitRuntimeService,IBMBackend
 from qiskit.transpiler import generate_preset_pass_manager
-from qiskit.qasm3 import dumps
+#from qiskit.qasm3 import dumps
+from qiskit.qasm2 import dumps
 from qiskit.quantum_info import SparsePauliOp
 
 from typing import List, Optional
@@ -28,7 +29,7 @@ class TranspileRequest(BaseModel):
 
 class LayoutRequest(BaseModel):
     circuit: str     
-    observables: List[Pauli]
+    observables: List[List[Pauli]]
     backend: str
     optimization_level: int = 1
 
@@ -39,7 +40,7 @@ class TranspileResponse(BaseModel):
 
 class LayoutResponse(BaseModel):
     qasm: str
-    observables: List[Pauli]
+    observables: List[List[Pauli]]
 
 
 class CircuitRequest(BaseModel):
@@ -122,13 +123,10 @@ def build(circuit: str) -> QuantumCircuit:
 
 def transpile(backend: IBMBackend, qc: QuantumCircuit, level: int) -> QuantumCircuit:
     try:
-        print("2.1")
         pass_manager = generate_preset_pass_manager(
             backend=backend,optimization_level=level
         )
-        print("2.2")
         qct = pass_manager.run(qc)
-        print("2.3")
         return qct
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Transpilation failed: {e}")
@@ -146,11 +144,8 @@ def render(qc: QuantumCircuit) -> bytes:
 def transpile_circuit(req: TranspileRequest):
 
     qc = build(req.circuit)
-    print("1")
     backend = resolve_backend(req.backend)
-    print("2")
     qct = transpile(backend, qc, req.optimization_level)
-    print("3")
     qasm=dumps(qct)
 
     return TranspileResponse(qasm=qasm)
@@ -163,14 +158,14 @@ def layout_circuit(req: LayoutRequest):
     qct = transpile(backend, qc, req.optimization_level)
     qasm = dumps(qct)
 
-    print(f"Before: {req.observables}")
-    observables = list_to_sparse(req.observables)
-    print(f"After: {observables}")
-    observables2 = observables.apply_layout(qct.layout)
-    paulis = sparse_to_list(observables2)
-    print(f"After: {paulis}")
+    observables : List[List[Pauli]]=[]
+    for oo in req.observables: 
+        sparse = list_to_sparse(oo)
+        mapped = sparse.apply_layout(qct.layout)
+        mapped_list = sparse_to_list(mapped)
+        observables.append(mapped_list)
 
-    return LayoutResponse(qasm=qasm, observables=paulis)
+    return LayoutResponse(qasm=qasm, observables=observables)
 
 @app.post("/draw")
 def draw_circuit(req: CircuitRequest):
